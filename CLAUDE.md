@@ -2,130 +2,96 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🎯 Current Status (Updated)
-
-**Project State:** Ready for testing - Phased implementation approach
-**Last Updated:** 2025-01-07
-
-### Current Configuration
-
-**Active Commands:**
-- ✅ `commandDialog` - Test command (Phase 1 verification)
-- ⚠️ `contour` - Main Contour feature (commented out, ready to enable)
-
-**Disabled Commands:**
-- ❌ `paletteShow` - Commented out
-- ❌ `paletteSend` - Commented out
-
-**Next Step:** Follow QUICKSTART.md for step-by-step testing
-
----
-
 ## Project Overview
 
-This is a Fusion 360 Add-in built using Python and the Fusion 360 API. The add-in follows Autodesk's standard template structure for Fusion 360 add-ins with a command-based architecture.
+**Split with Planes** - Fusion 360 Add-in for splitting bodies with parallel construction planes.
+
+This add-in allows users to:
+- Select bodies to split
+- Choose start and end points to define the split direction
+- Specify number of divisions
+- Automatically create construction planes and split the bodies
 
 ## Development Environment
 
-**Location:** This add-in is installed at:
+**Location:**
 ```
 /Users/hiroshi.kimura/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Rhino-Contour/
 ```
 
-**Testing in Fusion 360:**
+**Testing:**
 1. Open Fusion 360
 2. Navigate to **Utilities → Add-Ins** (or press Shift+S)
 3. Select "My Add-Ins" tab
-4. Find "Rhino-Contour" in the list
-5. Click "Run" to test changes
+4. Find "Rhino-Contour" and click "Run"
 
 **Debugging:**
-- Set `DEBUG = True` in `config.py` to enable verbose logging
+- Set `DEBUG = True` in `config.py` for verbose logging
 - Logs appear in Fusion 360's Text Command window
-- Error messages are logged to Fusion 360's log file
-- Python print statements appear in the IDE console
 
 ## Architecture
 
-### Entry Point
-- `Rhino-Contour.py`: Main entry point with `run()` and `stop()` functions
-- `config.py`: Global configuration (company name, add-in name, palette IDs, debug flag)
-
-### Command Structure
-The add-in uses a modular command architecture where each command is a separate module:
-
+### File Structure
 ```
-commands/
-├── __init__.py              # Registers all commands
-├── commandDialog/           # Dialog-based command example
-│   ├── entry.py            # Command implementation
-│   └── resources/          # Icons (16x16, 32x32, 64x64)
-├── paletteShow/            # HTML palette command
-│   ├── entry.py            # Command implementation
-│   └── resources/
-│       ├── html/
-│       │   ├── index.html
-│       │   └── static/palette.js
-│       └── icons/
-└── paletteSend/            # Palette communication example
-    └── entry.py
+Rhino-Contour/
+├── Rhino-Contour.py          # Entry point (run/stop)
+├── config.py                  # Global configuration
+├── commands/
+│   ├── __init__.py           # Command registration
+│   └── contour/
+│       ├── __init__.py
+│       ├── entry.py          # Main command implementation
+│       └── resources/        # Icons (16x16, 32x32, 64x64)
+└── lib/
+    └── fusionAddInUtils/     # Utility functions
 ```
 
-**Adding a New Command:**
-1. Duplicate an existing command directory (e.g., `commandDialog/`)
-2. Modify the `entry.py` file with your command logic
-3. Update `CMD_ID`, `CMD_NAME`, `CMD_Description` constants
-4. Import the new command in `commands/__init__.py`
-5. Add it to the `commands` list
+### Key Functions (commands/contour/entry.py)
 
-### Key Command Lifecycle
-Each command module must implement:
-- `start()`: Called when add-in starts - creates UI buttons and registers event handlers
-- `stop()`: Called when add-in stops - cleans up UI elements and handlers
-- `command_created()`: Defines the command dialog and connects event handlers
-- `command_execute()`: Main command logic when user clicks OK
+- `start()` / `stop()` - Add-in lifecycle
+- `command_created()` - Creates UI dialog with inputs
+- `command_execute()` - Main execution logic
+- `split_bodies_with_planes()` - Core splitting algorithm
+- `get_point_from_selection()` - Extract Point3D from selection
 
-### Event Handler Management
-**Critical:** Event handlers must be maintained in memory to prevent garbage collection.
-- Use `futil.add_handler()` to register handlers (automatically tracked)
-- Use `local_handlers = []` list for command-specific handlers
-- Clear all handlers in `command_destroy()` with `local_handlers = []`
+### Splitting Algorithm
 
-### Palette (HTML UI) Commands
-Palette commands display HTML interfaces within Fusion 360:
-- HTML files stored in `commands/[command_name]/resources/html/`
-- JavaScript communicates with Python via `adsk.fusionSendData()` (JS → Python)
-- Python returns data via `html_args.returnData` (Python → JS)
-- Handle events in `palette_incoming()` function
+1. Calculate direction from start to end point
+2. Verify direction aligns with X, Y, or Z axis
+3. Create construction planes at equal intervals
+4. Split bodies using SplitBodyFeature
+5. Clean up construction planes
 
-### Utility Functions (`lib/fusionAddInUtils/`)
-- `futil.log(message, level, force_console)`: Logging with debug mode support
-- `futil.handle_error(name, show_message_box)`: Centralized error handling
-- `futil.add_handler()`: Register event handlers with automatic tracking
-- `futil.clear_handlers()`: Clean up all registered event handlers
+## UI Inputs
+
+- **Bodies** - Select solid bodies to split (1 or more)
+- **Start Point** - Vertex, SketchPoint, or ConstructionPoint
+- **End Point** - Vertex, SketchPoint, or ConstructionPoint
+- **Number of Divisions** - Integer (1-100, default: 5)
+
+## Limitations
+
+- Direction must align with X, Y, or Z axis
+- Start/End points must be on axis-aligned line
 
 ## Configuration
 
-**Company and Add-in Identity:**
-Edit `config.py` to customize:
+Edit `config.py`:
 ```python
-COMPANY_NAME = 'ACME'  # Change to your company name
-ADDIN_NAME = 'Rhino-Contour'  # Automatically set from folder name
+DEBUG = True          # Enable verbose logging
+COMPANY_NAME = 'ACME' # Used in command IDs
 ```
 
-**UI Placement:**
-Each command specifies where its button appears:
+## Event Handler Management
+
+**Critical:** Event handlers must be maintained in `local_handlers` list to prevent garbage collection.
+
 ```python
-WORKSPACE_ID = 'FusionSolidEnvironment'  # The workspace
-PANEL_ID = 'SolidScriptsAddinsPanel'    # The toolbar panel
-COMMAND_BESIDE_ID = 'ScriptsManagerCommand'  # Position relative to this command
-IS_PROMOTED = True  # Show in main toolbar vs dropdown
+local_handlers = []
+
+# In command_created:
+futil.add_handler(args.command.execute, command_execute, local_handlers=local_handlers)
+
+# In command_destroy:
+local_handlers = []
 ```
-
-## Important Notes
-
-- **Event Handler References:** Always maintain references to event handlers in a list to prevent garbage collection
-- **Command IDs:** Must be globally unique - use `{COMPANY_NAME}_{ADDIN_NAME}_{CommandName}` pattern
-- **Palette IDs:** Defined in `config.py` for reuse across commands
-- **Resource Paths:** Use `os.path.join()` with `__file__` for cross-platform compatibility
-- **Web Browser:** Set `useNewWebBrowser=True` for modern HTML/CSS/JS support in palettes

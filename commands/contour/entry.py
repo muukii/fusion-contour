@@ -1,7 +1,6 @@
 import adsk.core
 import adsk.fusion
 import os
-import math
 from ...lib import fusionAddInUtils as futil
 from ... import config
 
@@ -11,7 +10,7 @@ ui = app.userInterface
 # Command identity
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_contour'
 CMD_NAME = 'Split with Planes'
-CMD_Description = 'Create parallel construction planes and split bodies'
+CMD_Description = 'Split bodies with parallel construction planes between two points'
 
 IS_PROMOTED = True
 
@@ -38,7 +37,7 @@ def start():
         
         futil.log(f'{CMD_NAME} command started successfully')
     except:
-        futil.handle_error('Failed to start Contour command')
+        futil.handle_error('Failed to start command')
 
 
 def stop():
@@ -55,7 +54,7 @@ def stop():
         
         futil.log(f'{CMD_NAME} command stopped successfully')
     except:
-        futil.handle_error('Failed to stop Contour command')
+        futil.handle_error('Failed to stop command')
 
 
 def command_created(args: adsk.core.CommandCreatedEventArgs):
@@ -137,12 +136,10 @@ def command_execute(args: adsk.core.CommandEventArgs):
 def get_point_from_selection(entity) -> adsk.core.Point3D:
     """Extract Point3D from various selection types."""
     if hasattr(entity, 'geometry'):
-        # BRepVertex or SketchPoint
         geom = entity.geometry
         if isinstance(geom, adsk.core.Point3D):
             return geom.copy()
     if hasattr(entity, 'worldGeometry'):
-        # ConstructionPoint
         return entity.worldGeometry.copy()
     if isinstance(entity, adsk.fusion.BRepVertex):
         return entity.geometry.copy()
@@ -152,71 +149,10 @@ def get_point_from_selection(entity) -> adsk.core.Point3D:
     raise ValueError(f'Cannot extract point from {type(entity)}')
 
 
-def get_direction_from_selection(entity) -> adsk.core.Vector3D:
-    """Extract direction Vector3D from edge, face, or construction axis."""
-    if isinstance(entity, adsk.fusion.BRepEdge):
-        # Get edge geometry (linear edges only)
-        geom = entity.geometry
-        if isinstance(geom, adsk.core.Line3D):
-            direction = geom.startPoint.vectorTo(geom.endPoint)
-            direction.normalize()
-            return direction
-        elif isinstance(geom, adsk.core.InfiniteLine3D):
-            return geom.direction.copy()
-    elif isinstance(entity, adsk.fusion.BRepFace):
-        # Get face normal at pointOnFace
-        evaluator = entity.evaluator
-        _, normal = evaluator.getNormalAtPoint(entity.pointOnFace)
-        return normal
-    elif isinstance(entity, adsk.fusion.ConstructionAxis):
-        # Get construction axis direction (Origin X/Y/Z axes)
-        line = entity.geometry
-        return line.direction.copy()
-    elif isinstance(entity, adsk.fusion.SketchLine):
-        # Sketch line (including construction lines)
-        geom = entity.geometry
-        direction = geom.startPoint.vectorTo(geom.endPoint)
-        direction.normalize()
-        return direction
-
-    raise ValueError(f'Cannot extract direction from {type(entity)}')
-
-
-def calculate_extent_along_direction(bodies, base_point: adsk.core.Point3D, direction: adsk.core.Vector3D):
-    """Calculate min/max extent of bodies along direction from base point."""
-    min_dist = float('inf')
-    max_dist = float('-inf')
-
-    for body in bodies:
-        bbox = body.boundingBox
-        # Check all 8 corners of bounding box
-        corners = [
-            adsk.core.Point3D.create(bbox.minPoint.x, bbox.minPoint.y, bbox.minPoint.z),
-            adsk.core.Point3D.create(bbox.maxPoint.x, bbox.minPoint.y, bbox.minPoint.z),
-            adsk.core.Point3D.create(bbox.minPoint.x, bbox.maxPoint.y, bbox.minPoint.z),
-            adsk.core.Point3D.create(bbox.maxPoint.x, bbox.maxPoint.y, bbox.minPoint.z),
-            adsk.core.Point3D.create(bbox.minPoint.x, bbox.minPoint.y, bbox.maxPoint.z),
-            adsk.core.Point3D.create(bbox.maxPoint.x, bbox.minPoint.y, bbox.maxPoint.z),
-            adsk.core.Point3D.create(bbox.minPoint.x, bbox.maxPoint.y, bbox.maxPoint.z),
-            adsk.core.Point3D.create(bbox.maxPoint.x, bbox.maxPoint.y, bbox.maxPoint.z),
-        ]
-
-        for corner in corners:
-            vec = base_point.vectorTo(corner)
-            dist = vec.dotProduct(direction)
-            min_dist = min(min_dist, dist)
-            max_dist = max(max_dist, dist)
-
-    return min_dist, max_dist
-
-
 def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: adsk.core.Point3D, divisions: int):
     """Split bodies with parallel construction planes between start and end points."""
     design = adsk.fusion.Design.cast(app.activeProduct)
     rootComp = design.rootComponent
-    activeComp = design.activeComponent
-    
-    futil.log(f'Active component: {activeComp.name}')
     
     # Calculate direction vector
     direction = start_point.vectorTo(end_point)
@@ -224,11 +160,6 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     direction.normalize()
     
     futil.log(f'Direction: {direction.asArray()}, Total distance: {total_distance} cm')
-    
-    # Calculate interval
-    interval = total_distance / divisions
-    
-    futil.log(f'Creating {divisions} construction planes at {interval} cm intervals')
     
     # Determine which axis we're aligned with
     xAxis = adsk.core.Vector3D.create(1, 0, 0)
@@ -280,11 +211,10 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     planes = rootComp.constructionPlanes
     planes_created = []
     
-    futil.log(f'Creating {divisions - 1} construction planes in rootComponent')
+    futil.log(f'Creating {divisions - 1} construction planes')
     
     # Create construction planes at intermediate positions
-    for i in range(1, divisions):  # divisions-1 planes (we don't need planes at start/end)
-        # Calculate position along the axis
+    for i in range(1, divisions):
         plane_position = start_coord + (axis_interval * i)
         
         try:
@@ -298,7 +228,7 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
         except Exception as e:
             futil.log(f'Error creating plane {i}: {str(e)}')
     
-    # Now split the bodies with these planes
+    # Split the bodies with these planes
     futil.log(f'Starting to split {len(bodies)} bodies with {len(planes_created)} planes')
     
     # Get the parent component of the first body for split operations
@@ -324,10 +254,7 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
         # Try to split each body with this plane
         for body in current_bodies:
             try:
-                # Create split body input
-                splitInput = splitFeatures.createInput(body, plane, True)  # True = keep both sides
-                
-                # Execute split
+                splitInput = splitFeatures.createInput(body, plane, True)
                 splitFeature = splitFeatures.add(splitInput)
                 
                 if splitFeature:
@@ -335,7 +262,6 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
                     futil.log(f'    ✓ Split body successfully')
                     
             except Exception as e:
-                # This is expected - body doesn't intersect with the plane
                 futil.log(f'    - Skipped (no intersection)')
     
     # Count final bodies
@@ -358,191 +284,15 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     ui.messageBox(msg)
 
 
-def generate_contours_old(bodies, base_point: adsk.core.Point3D, direction: adsk.core.Vector3D, distance: float):
-    """Generate contour curves by intersecting bodies with parallel planes using temporary sketches."""
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    rootComp = design.rootComponent
-
-    # Calculate extent
-    min_dist, max_dist = calculate_extent_along_direction(bodies, base_point, direction)
-
-    if min_dist >= max_dist:
-        ui.messageBox('Could not determine body extent along direction.')
-        return
-
-    # Snap min_dist to nearest multiple of distance below or at 0
-    start_offset = math.floor(min_dist / distance) * distance
-    end_offset = max_dist
-
-    # Number of planes
-    num_planes = int(math.ceil((end_offset - start_offset) / distance)) + 1
-
-    futil.log(f'Contour: min={min_dist}, max={max_dist}, start={start_offset}, num_planes={num_planes}')
-
-    # Normalize direction vector
-    direction.normalize()
-
-    # Create output sketch on XY plane
-    xyPlane = rootComp.xYConstructionPlane
-    outputSketch = rootComp.sketches.add(xyPlane)
-    outputSketch.name = 'Contours'
-
-    curves_created = 0
-
-    # Determine which axis the direction is aligned with
-    xAxis = adsk.core.Vector3D.create(1, 0, 0)
-    yAxis = adsk.core.Vector3D.create(0, 1, 0)
-    zAxis = adsk.core.Vector3D.create(0, 0, 1)
-    
-    # Check alignment with each axis (allowing for negative direction)
-    dotX = abs(direction.dotProduct(xAxis))
-    dotY = abs(direction.dotProduct(yAxis))
-    dotZ = abs(direction.dotProduct(zAxis))
-    
-    # Determine which plane to use for offset
-    basePlane = None
-    axisName = None
-    
-    if dotX > 0.999:
-        # X-axis aligned - use YZ plane
-        basePlane = rootComp.yZConstructionPlane
-        axisName = 'X'
-    elif dotY > 0.999:
-        # Y-axis aligned - use XZ plane  
-        basePlane = rootComp.xZConstructionPlane
-        axisName = 'Y'
-    elif dotZ > 0.999:
-        # Z-axis aligned - use XY plane
-        basePlane = rootComp.xYConstructionPlane
-        axisName = 'Z'
-    
-    if basePlane:
-        futil.log(f'Using {axisName}-axis aligned method')
-        
-        for i in range(num_planes):
-            offset = start_offset + i * distance
-            
-            try:
-                # Create construction plane at offset
-                planes = rootComp.constructionPlanes
-                planeInput = planes.createInput()
-                offsetValue = adsk.core.ValueInput.createByReal(offset)
-                planeInput.setByOffset(basePlane, offsetValue)
-                tempPlane = planes.add(planeInput)
-                
-                # Create temporary sketch on this plane
-                tempSketch = rootComp.sketches.add(tempPlane)
-                
-                # Intersect with bodies
-                bodyCollection = adsk.core.ObjectCollection.create()
-                for body in bodies:
-                    bodyCollection.add(body)
-                
-                intersectionCurves = tempSketch.intersectWithSketchPlane(bodyCollection)
-                
-                if intersectionCurves and intersectionCurves.count > 0:
-                    futil.log(f'  Offset {offset}: found {intersectionCurves.count} curves')
-                    
-                    # Copy curves to output sketch
-                    for j in range(intersectionCurves.count):
-                        curve = intersectionCurves.item(j)
-                        copy_sketch_curve_to_sketch(curve, outputSketch, offset, direction)
-                        curves_created += 1
-                
-                # Clean up
-                tempSketch.deleteMe()
-                tempPlane.deleteMe()
-                
-            except Exception as e:
-                futil.log(f'  Error at offset {offset}: {str(e)}')
-    
-    else:
-        # Complex case: arbitrary direction - not aligned with any axis
-        futil.log(f'Direction not aligned with any axis (X:{dotX:.3f}, Y:{dotY:.3f}, Z:{dotZ:.3f})')
-        msg = 'Currently, only X/Y/Z-axis aligned contours are supported.\n\nPlease select:\n- X-axis, Y-axis, or Z-axis from the Origin\n- Or a straight edge aligned with one of these axes'
-        ui.messageBox(msg)
-        return
-
-    if curves_created > 0:
-        msg = f'✓ Successfully created {curves_created} contour curves!'
-        futil.log(msg)
-        ui.messageBox(msg)
-    else:
-        msg = 'No intersections found. Check body positions relative to contour planes.'
-        futil.log(msg)
-        ui.messageBox(msg)
-
-
-def copy_sketch_curve_to_sketch(sourceCurve, targetSketch: adsk.fusion.Sketch, offset: float, direction: adsk.core.Vector3D):
-    """Copy a sketch curve from one sketch to another, projecting to target sketch plane."""
-    curves = targetSketch.sketchCurves
-    
-    try:
-        # Get the 3D geometry of the source curve
-        geom = sourceCurve.geometry
-        
-        if isinstance(sourceCurve, adsk.fusion.SketchLine):
-            # Line
-            start = targetSketch.modelToSketchSpace(sourceCurve.startSketchPoint.geometry)
-            end = targetSketch.modelToSketchSpace(sourceCurve.endSketchPoint.geometry)
-            curves.sketchLines.addByTwoPoints(start, end)
-            
-        elif isinstance(sourceCurve, adsk.fusion.SketchArc):
-            # Arc - use three points
-            start = targetSketch.modelToSketchSpace(sourceCurve.startSketchPoint.geometry)
-            end = targetSketch.modelToSketchSpace(sourceCurve.endSketchPoint.geometry)
-            # Get midpoint of arc
-            _, midPoint3D = sourceCurve.geometry.evaluator.getPointAtParameter(0.5)
-            mid = targetSketch.modelToSketchSpace(midPoint3D)
-            curves.sketchArcs.addByThreePoints(start, mid, end)
-            
-        elif isinstance(sourceCurve, adsk.fusion.SketchCircle):
-            # Circle
-            center = targetSketch.modelToSketchSpace(sourceCurve.centerSketchPoint.geometry)
-            curves.sketchCircles.addByCenterRadius(center, sourceCurve.radius)
-            
-        elif isinstance(sourceCurve, adsk.fusion.SketchEllipse):
-            # Ellipse
-            center = targetSketch.modelToSketchSpace(sourceCurve.centerSketchPoint.geometry)
-            majorAxis = sourceCurve.majorAxis
-            curves.sketchEllipses.add(center, majorAxis, sourceCurve.majorRadius, sourceCurve.minorRadius)
-            
-        elif isinstance(sourceCurve, adsk.fusion.SketchFittedSpline):
-            # Fitted spline - get fit points
-            fitPoints = adsk.core.ObjectCollection.create()
-            for point in sourceCurve.fitPoints:
-                fitPoints.add(targetSketch.modelToSketchSpace(point.geometry))
-            curves.sketchFittedSplines.add(fitPoints)
-            
-        elif isinstance(sourceCurve, adsk.fusion.SketchFixedSpline):
-            # Fixed spline - use the NURBS geometry
-            nurbs = sourceCurve.geometry
-            curves.sketchFixedSplines.add(nurbs)
-            
-        else:
-            # For other curve types, try to get geometry and add as fixed spline
-            if hasattr(geom, 'asNurbsCurve'):
-                nurbs = geom.asNurbsCurve()
-                curves.sketchFixedSplines.add(nurbs)
-            else:
-                futil.log(f'Unsupported sketch curve type: {type(sourceCurve)}')
-                
-    except Exception as e:
-        futil.log(f'Error copying curve to sketch: {type(sourceCurve)} - {str(e)}')
-
-
 def command_preview(args: adsk.core.CommandEventArgs):
-    futil.log(f'{CMD_NAME} Command Preview Event')
+    pass
 
 
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
-    changed_input = args.input
-    futil.log(f'{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}')
+    pass
 
 
 def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
-    futil.log(f'{CMD_NAME} Validate Input Event')
-
     inputs = args.inputs
 
     body_select: adsk.core.SelectionCommandInput = inputs.itemById('body_select')
@@ -561,6 +311,5 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
 
 
 def command_destroy(args: adsk.core.CommandEventArgs):
-    futil.log(f'{CMD_NAME} Command Destroy Event')
     global local_handlers
     local_handlers = []
