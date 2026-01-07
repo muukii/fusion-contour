@@ -1,13 +1,18 @@
-# Split with Planes - Fusion 360 Add-in
+# Contour - Fusion 360 Add-in
 
-A Fusion 360 add-in for splitting bodies with parallel construction planes. Divides bodies into equal segments between two points.
+A Fusion 360 add-in for creating contour curves or splitting bodies with parallel planes. Similar to Rhino's Contour command.
 
 ## Features
 
-- Split multiple bodies at once
-- Define direction and distance using start/end points
-- Set number of divisions (1-100)
-- Automatic creation and cleanup of construction planes
+### Mode 1: Contour Curves (Default)
+- Creates intersection curves between bodies and parallel planes
+- All curves are collected into a single sketch
+- Optionally delete original bodies after creating curves
+- Perfect for creating cross-section profiles
+
+### Mode 2: Split Body
+- Splits bodies into multiple parts using parallel planes
+- Construction planes are automatically cleaned up after splitting
 
 ## Usage
 
@@ -16,51 +21,51 @@ A Fusion 360 add-in for splitting bodies with parallel construction planes. Divi
 - Press `Shift+S` → Select "Rhino-Contour" → Click **Run**
 
 ### 2. Execute the Command
-- Click the **"Split with Planes"** button in the toolbar
+- Click the **"Contour"** button in the toolbar
 
 ### 3. Set Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| **Bodies** | Select bodies to split (multiple selection allowed) |
+| **Mode** | Choose "Contour Curves" or "Split Body" |
+| **Bodies** | Select bodies (multiple selection allowed) |
 | **Start Point** | Starting point (vertex, sketch point, or construction point) |
 | **End Point** | Ending point (vertex, sketch point, or construction point) |
-| **Number of Divisions** | Number of divisions (default: 5) |
+| **Number of Divisions** | Number of sections (default: 5) |
+| **Delete Original Bodies** | (Contour Curves mode only) Remove bodies after creating curves |
 
 ### 4. Execute
 - Click **OK**
-- Bodies will be split into the specified number of parts
+- Contour curves will be created in a new sketch named "Contours"
+- Or bodies will be split into the specified number of parts
 
 ## Example
 
-### Split a Cube into 5 Parts
-1. Create a cube
-2. Bodies: Select the cube
-3. Start Point: Select a vertex on the bottom face
-4. End Point: Select a vertex on the top face (directly above)
-5. Number of Divisions: 5
-6. Click OK → Cube is split into 5 bodies
+### Create 5 Contour Sections
+1. Create a complex 3D shape
+2. Mode: Contour Curves
+3. Bodies: Select the shape
+4. Start Point: Select a vertex on the bottom
+5. End Point: Select a vertex on the top (directly above)
+6. Number of Divisions: 5
+7. Delete Original Bodies: Checked
+8. Click OK → 6 cross-section curves created (5 divisions = 6 sections)
 
 ```
-Before:           After:
-┌─────────┐      ┌─────────┐
-│         │      ├─────────┤
-│         │  →   ├─────────┤
-│         │      ├─────────┤
-│         │      ├─────────┤
-└─────────┘      └─────────┘
+Original Body:          Result (6 sections):
+    ___                     ___  ← Section 6
+   /   \                   /   \
+  |     |                 |     | ← Section 5
+  |     |        →        |     | ← Section 4
+  |     |                 |     | ← Section 3
+  |     |                 |     | ← Section 2
+  \_____/                 \_____/ ← Section 1
 ```
 
 ## Limitations
 
 - Direction must be parallel to X, Y, or Z axis
 - Arbitrary (angled) directions are not currently supported
-
-## Installation Location
-
-```
-/Users/hiroshi.kimura/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Rhino-Contour/
-```
 
 ## File Structure
 
@@ -84,9 +89,9 @@ Rhino-Contour/
 - Check logs in Text Commands window
 - Set `DEBUG = True` in `config.py`
 
-### Bodies Not Splitting
+### No Curves Created
 - Verify start/end points are aligned with X/Y/Z axis
-- Check if bodies intersect with the planes
+- Check if bodies intersect with the planes at the specified positions
 
 ## License
 

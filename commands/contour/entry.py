@@ -9,8 +9,8 @@ ui = app.userInterface
 
 # Command identity
 CMD_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_contour'
-CMD_NAME = 'Split with Planes'
-CMD_Description = 'Split bodies with parallel construction planes between two points'
+CMD_NAME = 'Contour'
+CMD_Description = 'Create contour curves or split bodies with parallel planes'
 
 IS_PROMOTED = True
 
@@ -23,6 +23,10 @@ ICON_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource
 
 # Event handlers reference
 local_handlers = []
+
+# Mode constants
+MODE_CONTOUR_CURVES = 'Contour Curves'
+MODE_SPLIT_BODY = 'Split Body'
 
 
 def start():
@@ -62,8 +66,13 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
     inputs = args.command.commandInputs
 
+    # Mode selection (Contour Curves or Split Body)
+    mode_input = inputs.addDropDownCommandInput('mode', 'Mode', adsk.core.DropDownStyles.TextListDropDownStyle)
+    mode_input.listItems.add(MODE_CONTOUR_CURVES, True)  # Default
+    mode_input.listItems.add(MODE_SPLIT_BODY, False)
+
     # Body selection (multiple)
-    body_select = inputs.addSelectionInput('body_select', 'Bodies', 'Select bodies to split')
+    body_select = inputs.addSelectionInput('body_select', 'Bodies', 'Select bodies')
     body_select.addSelectionFilter('SolidBodies')
     body_select.setSelectionLimits(1, 0)  # 1 to unlimited
 
@@ -82,7 +91,10 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     end_point.setSelectionLimits(1, 1)
 
     # Number of divisions
-    inputs.addIntegerSpinnerCommandInput('divisions', 'Number of Divisions', 1, 100, 1, 5)
+    inputs.addIntegerSpinnerCommandInput('divisions', 'Number of Divisions', 2, 100, 1, 5)
+
+    # Delete original bodies option (for Contour Curves mode)
+    delete_bodies = inputs.addBoolValueInput('delete_bodies', 'Delete Original Bodies', True, '', False)
 
     # Connect event handlers
     futil.add_handler(args.command.execute, command_execute, local_handlers=local_handlers)
@@ -98,10 +110,15 @@ def command_execute(args: adsk.core.CommandEventArgs):
     inputs = args.command.commandInputs
 
     # Get inputs
+    mode_input: adsk.core.DropDownCommandInput = inputs.itemById('mode')
     body_select: adsk.core.SelectionCommandInput = inputs.itemById('body_select')
     start_point_input: adsk.core.SelectionCommandInput = inputs.itemById('start_point')
     end_point_input: adsk.core.SelectionCommandInput = inputs.itemById('end_point')
     divisions_input: adsk.core.IntegerSpinnerCommandInput = inputs.itemById('divisions')
+    delete_bodies_input: adsk.core.BoolValueCommandInput = inputs.itemById('delete_bodies')
+
+    # Get mode
+    mode = mode_input.selectedItem.name
 
     # Collect bodies
     bodies = []
@@ -115,22 +132,29 @@ def command_execute(args: adsk.core.CommandEventArgs):
     # Get number of divisions
     divisions = divisions_input.value
 
-    # Execute split operation
+    # Get delete bodies option
+    delete_bodies = delete_bodies_input.value
+
+    # Execute based on mode
     try:
-        futil.log(f'=== Starting Body Split ===')
+        futil.log(f'=== Starting {mode} ===')
         futil.log(f'Bodies: {len(bodies)}')
         futil.log(f'Start point: {start_point.asArray()}')
         futil.log(f'End point: {end_point.asArray()}')
         futil.log(f'Divisions: {divisions}')
+        futil.log(f'Delete bodies: {delete_bodies}')
         
-        split_bodies_with_planes(bodies, start_point, end_point, divisions)
+        if mode == MODE_CONTOUR_CURVES:
+            create_contour_curves(bodies, start_point, end_point, divisions, delete_bodies)
+        else:
+            split_bodies_with_planes(bodies, start_point, end_point, divisions)
         
-        futil.log(f'=== Body Split Completed ===')
+        futil.log(f'=== {mode} Completed ===')
     except Exception as e:
-        error_msg = f'Error splitting bodies: {str(e)}'
+        error_msg = f'Error: {str(e)}'
         ui.messageBox(error_msg)
         futil.log(error_msg, adsk.core.LogLevels.ErrorLogLevel)
-        futil.handle_error('Body Split Failed')
+        futil.handle_error(f'{mode} Failed')
 
 
 def get_point_from_selection(entity) -> adsk.core.Point3D:
@@ -149,8 +173,8 @@ def get_point_from_selection(entity) -> adsk.core.Point3D:
     raise ValueError(f'Cannot extract point from {type(entity)}')
 
 
-def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: adsk.core.Point3D, divisions: int):
-    """Split bodies with parallel construction planes between start and end points."""
+def get_axis_info(start_point: adsk.core.Point3D, end_point: adsk.core.Point3D):
+    """Calculate axis alignment and return base plane info."""
     design = adsk.fusion.Design.cast(app.activeProduct)
     rootComp = design.rootComponent
     
@@ -158,8 +182,6 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     direction = start_point.vectorTo(end_point)
     total_distance = direction.length
     direction.normalize()
-    
-    futil.log(f'Direction: {direction.asArray()}, Total distance: {total_distance} cm')
     
     # Determine which axis we're aligned with
     xAxis = adsk.core.Vector3D.create(1, 0, 0)
@@ -170,44 +192,248 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     dotY = abs(direction.dotProduct(yAxis))
     dotZ = abs(direction.dotProduct(zAxis))
     
-    # Determine base plane (use rootComponent for correct world coordinates)
+    # Determine base plane
     basePlane = None
     axisName = None
     
     if dotX > 0.999:
         basePlane = rootComp.yZConstructionPlane
         axisName = 'X'
+        start_coord = start_point.x
+        end_coord = end_point.x
     elif dotY > 0.999:
         basePlane = rootComp.xZConstructionPlane
         axisName = 'Y'
+        start_coord = start_point.y
+        end_coord = end_point.y
     elif dotZ > 0.999:
         basePlane = rootComp.xYConstructionPlane
         axisName = 'Z'
+        start_coord = start_point.z
+        end_coord = end_point.z
+    else:
+        return None, None, None, None, None
+    
+    return basePlane, axisName, start_coord, end_coord, direction
+
+
+def create_contour_curves(bodies, start_point: adsk.core.Point3D, end_point: adsk.core.Point3D, divisions: int, delete_bodies: bool):
+    """Create contour curves - Step by step implementation."""
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    rootComp = design.rootComponent
+    activeComp = design.activeComponent
+    
+    futil.log(f'Active component: {activeComp.name}')
+    
+    # Get axis info (uses rootComp for base planes - world coordinates)
+    basePlane, axisName, start_coord, end_coord, direction = get_axis_info(start_point, end_point)
     
     if not basePlane:
-        msg = f'Direction must be aligned with X, Y, or Z axis.\n\nCurrent direction: ({direction.x:.3f}, {direction.y:.3f}, {direction.z:.3f})\n\nPlease select start/end points that are aligned with one of the coordinate axes.'
+        msg = 'Direction must be aligned with X, Y, or Z axis.\n\nPlease select start/end points that are aligned with one of the coordinate axes.'
+        ui.messageBox(msg)
+        return
+    
+    futil.log(f'=== Step 1: Create Sketches ===')
+    futil.log(f'Axis: {axisName}')
+    futil.log(f'Range: {start_coord:.4f} to {end_coord:.4f}')
+    futil.log(f'Divisions: {divisions} → {divisions + 1} sketches')
+    
+    # Calculate interval
+    axis_interval = (end_coord - start_coord) / divisions
+    futil.log(f'Interval: {axis_interval:.4f}')
+    
+    # Use rootComp for construction planes (world coordinates)
+    # But create sketches in activeComp
+    rootPlanes = rootComp.constructionPlanes
+    sketches_created = []
+    planes_created = []
+    
+    # Create sketch at each division point (including start and end)
+    # 5 divisions = 6 sketches (positions 0, 1, 2, 3, 4, 5)
+    for i in range(divisions + 1):
+        plane_position = start_coord + (axis_interval * i)
+        
+        futil.log(f'Creating sketch {i + 1}/{divisions + 1} at {axisName}={plane_position:.4f}')
+        
+        try:
+            # Step 1a: Create construction plane in rootComp (world coordinates)
+            planeInput = rootPlanes.createInput()
+            offsetValue = adsk.core.ValueInput.createByReal(plane_position)
+            planeInput.setByOffset(basePlane, offsetValue)
+            tempPlane = rootPlanes.add(planeInput)
+            tempPlane.name = f'Contour Plane {i + 1}'
+            planes_created.append(tempPlane)
+            futil.log(f'  ✓ Created plane at world {axisName}={plane_position:.4f}')
+            
+            # Step 1b: Create sketch on this plane in activeComp
+            sketch = activeComp.sketches.add(tempPlane)
+            sketch.name = f'Contour {i + 1}'
+            futil.log(f'  ✓ Created sketch: {sketch.name}')
+            
+            # Step 2: Add intersection curves to sketch
+            curves_added = 0
+            for body in bodies:
+                try:
+                    # projectCutEdges creates curves where the body intersects the sketch plane
+                    result = sketch.projectCutEdges(body)
+                    if result:
+                        curves_added += result.count
+                        futil.log(f'  ✓ projectCutEdges: {result.count} curves from body')
+                except Exception as e:
+                    futil.log(f'  ✗ projectCutEdges error: {str(e)}')
+            
+            if curves_added > 0:
+                sketches_created.append(sketch)
+                futil.log(f'  ✓ Total curves in sketch: {curves_added}')
+            else:
+                # No curves - delete empty sketch
+                sketch.deleteMe()
+                futil.log(f'  - No intersection, deleted empty sketch')
+            
+        except Exception as e:
+            futil.log(f'  ✗ Error: {str(e)}')
+    
+    # Clean up construction planes (keep sketches)
+    futil.log('Cleaning up construction planes...')
+    for plane in planes_created:
+        try:
+            plane.deleteMe()
+        except:
+            pass
+    
+    # Delete original bodies if requested
+    if delete_bodies and len(sketches_created) > 0:
+        futil.log('Deleting original bodies...')
+        for body in bodies:
+            try:
+                body.deleteMe()
+            except:
+                pass
+    
+    # Show result
+    msg = f'✓ Contour curves created!\n\n'
+    msg += f'• {divisions + 1} sections processed\n'
+    msg += f'• {len(sketches_created)} sketches with curves\n'
+    msg += f'• Construction planes cleaned up'
+    if delete_bodies and len(sketches_created) > 0:
+        msg += f'\n• Original bodies deleted'
+    
+    futil.log(msg)
+    ui.messageBox(msg)
+
+
+def copy_curve_to_output_sketch(sourceCurve, outputSketch: adsk.fusion.Sketch, sourceSketch: adsk.fusion.Sketch):
+    """Copy a curve from source sketch to output sketch, preserving 3D position."""
+    
+    # Get the 3D geometry of the curve
+    if isinstance(sourceCurve, adsk.fusion.SketchLine):
+        # Get 3D points from the sketch line
+        startPt3D = sourceSketch.sketchToModelSpace(sourceCurve.startSketchPoint.geometry)
+        endPt3D = sourceSketch.sketchToModelSpace(sourceCurve.endSketchPoint.geometry)
+        
+        # Convert to output sketch space
+        startPt = outputSketch.modelToSketchSpace(startPt3D)
+        endPt = outputSketch.modelToSketchSpace(endPt3D)
+        
+        outputSketch.sketchCurves.sketchLines.addByTwoPoints(startPt, endPt)
+        
+    elif isinstance(sourceCurve, adsk.fusion.SketchArc):
+        # Get 3D points from the arc
+        startPt3D = sourceSketch.sketchToModelSpace(sourceCurve.startSketchPoint.geometry)
+        endPt3D = sourceSketch.sketchToModelSpace(sourceCurve.endSketchPoint.geometry)
+        
+        # Get midpoint of arc in 3D
+        evaluator = sourceCurve.geometry.evaluator
+        _, midParam = evaluator.getParameterAtLength(0, sourceCurve.length / 2)
+        _, midPt3D = evaluator.getPointAtParameter(midParam)
+        
+        # Convert to output sketch space
+        startPt = outputSketch.modelToSketchSpace(startPt3D)
+        midPt = outputSketch.modelToSketchSpace(midPt3D)
+        endPt = outputSketch.modelToSketchSpace(endPt3D)
+        
+        outputSketch.sketchCurves.sketchArcs.addByThreePoints(startPt, midPt, endPt)
+        
+    elif isinstance(sourceCurve, adsk.fusion.SketchCircle):
+        # Get center in 3D
+        centerPt3D = sourceSketch.sketchToModelSpace(sourceCurve.centerSketchPoint.geometry)
+        centerPt = outputSketch.modelToSketchSpace(centerPt3D)
+        
+        outputSketch.sketchCurves.sketchCircles.addByCenterRadius(centerPt, sourceCurve.radius)
+        
+    elif isinstance(sourceCurve, adsk.fusion.SketchEllipse):
+        # Get center in 3D
+        centerPt3D = sourceSketch.sketchToModelSpace(sourceCurve.centerSketchPoint.geometry)
+        centerPt = outputSketch.modelToSketchSpace(centerPt3D)
+        
+        # Get major axis endpoint for direction
+        majorAxisPt3D = adsk.core.Point3D.create(
+            centerPt3D.x + sourceCurve.majorAxis.x * sourceCurve.majorRadius,
+            centerPt3D.y + sourceCurve.majorAxis.y * sourceCurve.majorRadius,
+            centerPt3D.z + sourceCurve.majorAxis.z * sourceCurve.majorRadius
+        )
+        majorAxisPt = outputSketch.modelToSketchSpace(majorAxisPt3D)
+        
+        outputSketch.sketchCurves.sketchEllipses.add(centerPt, majorAxisPt, sourceCurve.minorRadius)
+        
+    elif isinstance(sourceCurve, adsk.fusion.SketchFittedSpline):
+        # Sample points along the spline and create fitted spline
+        points = adsk.core.ObjectCollection.create()
+        
+        # Get fit points in 3D and convert
+        for fitPoint in sourceCurve.fitPoints:
+            pt3D = sourceSketch.sketchToModelSpace(fitPoint.geometry)
+            pt = outputSketch.modelToSketchSpace(pt3D)
+            points.add(pt)
+        
+        if points.count >= 2:
+            outputSketch.sketchCurves.sketchFittedSplines.add(points)
+            
+    else:
+        # For other curve types, sample points and create fitted spline
+        try:
+            geom = sourceCurve.geometry
+            evaluator = geom.evaluator
+            _, startParam, endParam = evaluator.getParameterExtents()
+            
+            # Sample points along the curve
+            points = adsk.core.ObjectCollection.create()
+            numSamples = 30
+            
+            for k in range(numSamples + 1):
+                param = startParam + (endParam - startParam) * k / numSamples
+                _, pt3D = evaluator.getPointAtParameter(param)
+                pt3D_world = sourceSketch.sketchToModelSpace(pt3D)
+                pt = outputSketch.modelToSketchSpace(pt3D_world)
+                points.add(pt)
+            
+            if points.count >= 2:
+                outputSketch.sketchCurves.sketchFittedSplines.add(points)
+                
+        except Exception as e:
+            futil.log(f'    Could not copy curve type {type(sourceCurve)}: {str(e)}')
+
+
+def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: adsk.core.Point3D, divisions: int):
+    """Split bodies with parallel construction planes between start and end points."""
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    rootComp = design.rootComponent
+    
+    # Get axis info
+    basePlane, axisName, start_coord, end_coord, direction = get_axis_info(start_point, end_point)
+    
+    if not basePlane:
+        msg = 'Direction must be aligned with X, Y, or Z axis.\n\nPlease select start/end points that are aligned with one of the coordinate axes.'
         ui.messageBox(msg)
         return
     
     futil.log(f'Using {axisName}-axis alignment')
-    
-    # Get the coordinate values along the axis from start and end points
-    if axisName == 'X':
-        start_coord = start_point.x
-        end_coord = end_point.x
-    elif axisName == 'Y':
-        start_coord = start_point.y
-        end_coord = end_point.y
-    else:  # Z
-        start_coord = start_point.z
-        end_coord = end_point.z
-    
     futil.log(f'Axis range: {start_coord} to {end_coord}')
     
-    # Calculate interval along the axis
+    # Calculate interval
     axis_interval = (end_coord - start_coord) / divisions
     
-    # Create planes in rootComponent (top level) for correct world coordinates
+    # Create planes in rootComponent
     planes = rootComp.constructionPlanes
     planes_created = []
     
@@ -289,7 +515,19 @@ def command_preview(args: adsk.core.CommandEventArgs):
 
 
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
-    pass
+    changed_input = args.input
+    inputs = args.inputs
+    
+    # Update UI based on mode selection
+    if changed_input.id == 'mode':
+        mode_input: adsk.core.DropDownCommandInput = inputs.itemById('mode')
+        delete_bodies_input: adsk.core.BoolValueCommandInput = inputs.itemById('delete_bodies')
+        
+        # Show/hide delete bodies option based on mode
+        if mode_input.selectedItem.name == MODE_CONTOUR_CURVES:
+            delete_bodies_input.isVisible = True
+        else:
+            delete_bodies_input.isVisible = False
 
 
 def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
@@ -304,7 +542,7 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
     if (body_select.selectionCount >= 1 and
         start_point.selectionCount == 1 and
         end_point.selectionCount == 1 and
-        divisions.value >= 1):
+        divisions.value >= 2):
         args.areInputsValid = True
     else:
         args.areInputsValid = False

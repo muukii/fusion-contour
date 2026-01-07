@@ -4,13 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Split with Planes** - Fusion 360 Add-in for splitting bodies with parallel construction planes.
+**Contour** - Fusion 360 Add-in for creating contour curves or splitting bodies with parallel planes.
 
-This add-in allows users to:
-- Select bodies to split
-- Choose start and end points to define the split direction
-- Specify number of divisions
-- Automatically create construction planes and split the bodies
+Similar to Rhino's Contour command, this add-in:
+- Creates intersection curves between bodies and parallel planes
+- Or splits bodies into multiple parts
 
 ## Development Environment
 
@@ -40,7 +38,7 @@ Rhino-Contour/
 │   ├── __init__.py           # Command registration
 │   └── contour/
 │       ├── __init__.py
-│       ├── entry.py          # Main command implementation
+│       ├── entry.py          # Main command implementation (~450 lines)
 │       └── resources/        # Icons (16x16, 32x32, 64x64)
 └── lib/
     └── fusionAddInUtils/     # Utility functions
@@ -48,26 +46,57 @@ Rhino-Contour/
 
 ### Key Functions (commands/contour/entry.py)
 
+#### Core Functions
 - `start()` / `stop()` - Add-in lifecycle
 - `command_created()` - Creates UI dialog with inputs
-- `command_execute()` - Main execution logic
-- `split_bodies_with_planes()` - Core splitting algorithm
+- `command_execute()` - Routes to appropriate mode handler
+
+#### Mode Handlers
+- `create_contour_curves()` - Creates intersection curves in a sketch
+- `split_bodies_with_planes()` - Splits bodies using construction planes
+
+#### Helper Functions
 - `get_point_from_selection()` - Extract Point3D from selection
+- `get_axis_info()` - Determine axis alignment and base plane
+- `copy_curve_to_output_sketch()` - Copy curves between sketches
 
-### Splitting Algorithm
+### Algorithm: Contour Curves
 
-1. Calculate direction from start to end point
-2. Verify direction aligns with X, Y, or Z axis
-3. Create construction planes at equal intervals
-4. Split bodies using SplitBodyFeature
-5. Clean up construction planes
+1. Validate direction is aligned with X, Y, or Z axis
+2. Create output sketch on the appropriate base plane
+3. For each division point:
+   a. Create temporary construction plane at offset
+   b. Create temporary sketch on that plane
+   c. Use `Sketch.intersectWithSketchPlane(bodies)` to get curves
+   d. Copy curves to output sketch (preserving 3D positions)
+   e. Delete temporary sketch and plane
+4. Optionally delete original bodies
+
+### Algorithm: Split Body
+
+1. Validate direction is aligned with X, Y, or Z axis
+2. Create construction planes at division points
+3. For each plane, split all solid bodies
+4. Delete construction planes
 
 ## UI Inputs
 
-- **Bodies** - Select solid bodies to split (1 or more)
+- **Mode** - "Contour Curves" or "Split Body"
+- **Bodies** - Select solid bodies (1 or more)
 - **Start Point** - Vertex, SketchPoint, or ConstructionPoint
 - **End Point** - Vertex, SketchPoint, or ConstructionPoint
-- **Number of Divisions** - Integer (1-100, default: 5)
+- **Number of Divisions** - Integer (2-100, default: 5)
+- **Delete Original Bodies** - Boolean (Contour Curves mode only)
+
+## Curve Type Support
+
+The `copy_curve_to_output_sketch()` function handles:
+- SketchLine
+- SketchArc
+- SketchCircle
+- SketchEllipse
+- SketchFittedSpline
+- Other curves (sampled as fitted spline)
 
 ## Limitations
 
