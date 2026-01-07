@@ -1,48 +1,48 @@
 # Split with Planes - Fusion 360 Add-in
 
-Fusion 360用のボディ分割アドインです。2点間を指定した分割数で等間隔に分割します。
+A Fusion 360 add-in for splitting bodies with parallel construction planes. Divides bodies into equal segments between two points.
 
-## 機能
+## Features
 
-- 複数のボディを一度に分割
-- スタート/エンド点で方向と距離を指定
-- 分割数を自由に設定（1〜100）
-- Construction Planesを自動作成・自動削除
+- Split multiple bodies at once
+- Define direction and distance using start/end points
+- Set number of divisions (1-100)
+- Automatic creation and cleanup of construction planes
 
-## 使い方
+## Usage
 
-### 1. アドインを起動
-- Fusion 360を開く
-- `Shift+S` → "Rhino-Contour" → **Run**
+### 1. Start the Add-in
+- Open Fusion 360
+- Press `Shift+S` → Select "Rhino-Contour" → Click **Run**
 
-### 2. コマンドを実行
-- ツールバーの **"Split with Planes"** ボタンをクリック
+### 2. Execute the Command
+- Click the **"Split with Planes"** button in the toolbar
 
-### 3. パラメータ設定
+### 3. Set Parameters
 
-| パラメータ | 説明 |
-|-----------|------|
-| **Bodies** | 分割したいボディを選択（複数可） |
-| **Start Point** | 開始点（頂点・スケッチ点・構成点） |
-| **End Point** | 終了点（頂点・スケッチ点・構成点） |
-| **Number of Divisions** | 分割数（デフォルト: 5） |
+| Parameter | Description |
+|-----------|-------------|
+| **Bodies** | Select bodies to split (multiple selection allowed) |
+| **Start Point** | Starting point (vertex, sketch point, or construction point) |
+| **End Point** | Ending point (vertex, sketch point, or construction point) |
+| **Number of Divisions** | Number of divisions (default: 5) |
 
-### 4. 実行
-- **OK** をクリック
-- ボディが指定した数に分割されます
+### 4. Execute
+- Click **OK**
+- Bodies will be split into the specified number of parts
 
-## 使用例
+## Example
 
-### 立方体を5分割
-1. 立方体を作成
-2. Bodies: 立方体を選択
-3. Start Point: 底面の頂点
-4. End Point: 上面の頂点（真上）
+### Split a Cube into 5 Parts
+1. Create a cube
+2. Bodies: Select the cube
+3. Start Point: Select a vertex on the bottom face
+4. End Point: Select a vertex on the top face (directly above)
 5. Number of Divisions: 5
-6. OK → 5つのボディに分割
+6. Click OK → Cube is split into 5 bodies
 
 ```
-分割前:           分割後:
+Before:           After:
 ┌─────────┐      ┌─────────┐
 │         │      ├─────────┤
 │         │  →   ├─────────┤
@@ -51,43 +51,43 @@ Fusion 360用のボディ分割アドインです。2点間を指定した分割
 └─────────┘      └─────────┘
 ```
 
-## 制限事項
+## Limitations
 
-- 方向はX/Y/Z軸に平行である必要があります
-- 斜め方向の分割は現在サポートされていません
+- Direction must be parallel to X, Y, or Z axis
+- Arbitrary (angled) directions are not currently supported
 
-## インストール場所
+## Installation Location
 
 ```
 /Users/hiroshi.kimura/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Rhino-Contour/
 ```
 
-## ファイル構成
+## File Structure
 
 ```
 Rhino-Contour/
-├── Rhino-Contour.py      # エントリーポイント
-├── config.py             # 設定（DEBUG=True/False）
+├── Rhino-Contour.py      # Entry point
+├── config.py             # Configuration (DEBUG=True/False)
 ├── commands/
 │   └── contour/
-│       └── entry.py      # メイン実装
+│       └── entry.py      # Main implementation
 └── lib/
-    └── fusionAddInUtils/ # ユーティリティ
+    └── fusionAddInUtils/ # Utilities
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
-### ボタンが表示されない
-- アドインを Stop → Run で再起動
+### Button Not Appearing
+- Restart the add-in: Stop → Run
 
-### エラーが発生する
-- Text Commands ウィンドウでログを確認
-- `config.py` で `DEBUG = True` に設定
+### Errors Occurring
+- Check logs in Text Commands window
+- Set `DEBUG = True` in `config.py`
 
-### 分割されない
-- Start/End点がX/Y/Z軸に平行か確認
-- ボディが平面と交差しているか確認
+### Bodies Not Splitting
+- Verify start/end points are aligned with X/Y/Z axis
+- Check if bodies intersect with the planes
 
-## ライセンス
+## License
 
-Autodesk Fusion 360 Add-in テンプレートベース
+Based on Autodesk Fusion 360 Add-in Template
