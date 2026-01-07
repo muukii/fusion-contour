@@ -1,5 +1,12 @@
 # Contour - Fusion 360 Add-in
 
+<img width="1512" height="948" alt="image" src="https://github.com/user-attachments/assets/34928a65-305c-40cc-af79-ab572ff4dac1" />
+
+<img width="1512" height="948" alt="image" src="https://github.com/user-attachments/assets/c05d844e-d074-4756-85f3-838dda1e8e7b" />
+
+<img width="797" height="649" alt="image" src="https://github.com/user-attachments/assets/59dbabb3-79c6-4a33-aa46-330d7b59bc44" />
+
+
 A Fusion 360 add-in for creating contour curves or splitting bodies with parallel planes. Similar to Rhino's Contour command.
 
 ## Features
