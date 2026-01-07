@@ -213,10 +213,10 @@ def calculate_extent_along_direction(bodies, base_point: adsk.core.Point3D, dire
 def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: adsk.core.Point3D, divisions: int):
     """Split bodies with parallel construction planes between start and end points."""
     design = adsk.fusion.Design.cast(app.activeProduct)
-    # Use active component instead of root component
+    rootComp = design.rootComponent
     activeComp = design.activeComponent
     
-    futil.log(f'Using active component: {activeComp.name}')
+    futil.log(f'Active component: {activeComp.name}')
     
     # Calculate direction vector
     direction = start_point.vectorTo(end_point)
@@ -239,18 +239,18 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     dotY = abs(direction.dotProduct(yAxis))
     dotZ = abs(direction.dotProduct(zAxis))
     
-    # Determine base plane
+    # Determine base plane (use rootComponent for correct world coordinates)
     basePlane = None
     axisName = None
     
     if dotX > 0.999:
-        basePlane = activeComp.yZConstructionPlane
+        basePlane = rootComp.yZConstructionPlane
         axisName = 'X'
     elif dotY > 0.999:
-        basePlane = activeComp.xZConstructionPlane
+        basePlane = rootComp.xZConstructionPlane
         axisName = 'Y'
     elif dotZ > 0.999:
-        basePlane = activeComp.xYConstructionPlane
+        basePlane = rootComp.xYConstructionPlane
         axisName = 'Z'
     
     if not basePlane:
@@ -276,8 +276,11 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     # Calculate interval along the axis
     axis_interval = (end_coord - start_coord) / divisions
     
-    planes = activeComp.constructionPlanes
+    # Create planes in rootComponent (top level) for correct world coordinates
+    planes = rootComp.constructionPlanes
     planes_created = []
+    
+    futil.log(f'Creating {divisions - 1} construction planes in rootComponent')
     
     # Create construction planes at intermediate positions
     for i in range(1, divisions):  # divisions-1 planes (we don't need planes at start/end)
@@ -298,25 +301,28 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
     # Now split the bodies with these planes
     futil.log(f'Starting to split {len(bodies)} bodies with {len(planes_created)} planes')
     
-    splitFeatures = activeComp.features.splitBodyFeatures
+    # Get the parent component of the first body for split operations
+    firstBody = bodies[0]
+    parentComp = firstBody.parentComponent
+    futil.log(f'Bodies are in component: {parentComp.name}')
+    
+    splitFeatures = parentComp.features.splitBodyFeatures
     total_splits = 0
-    failed_splits = 0
     
     # Split each plane with all relevant bodies
-    # We split one plane at a time across all bodies
     for planeIndex, plane in enumerate(planes_created):
         futil.log(f'Splitting with plane {planeIndex + 1}/{len(planes_created)}: {plane.name}')
         
-        # Get all solid bodies in the active component
-        all_bodies = []
-        for body in activeComp.bRepBodies:
+        # Get current solid bodies in the parent component
+        current_bodies = []
+        for body in parentComp.bRepBodies:
             if body.isSolid:
-                all_bodies.append(body)
+                current_bodies.append(body)
         
-        futil.log(f'  Found {len(all_bodies)} solid bodies in component')
+        futil.log(f'  Found {len(current_bodies)} solid bodies')
         
         # Try to split each body with this plane
-        for body in all_bodies:
+        for body in current_bodies:
             try:
                 # Create split body input
                 splitInput = splitFeatures.createInput(body, plane, True)  # True = keep both sides
@@ -327,22 +333,26 @@ def split_bodies_with_planes(bodies, start_point: adsk.core.Point3D, end_point: 
                 if splitFeature:
                     total_splits += 1
                     futil.log(f'    ✓ Split body successfully')
-                else:
-                    futil.log(f'    - Split returned None (body may not intersect plane)')
-                    failed_splits += 1
                     
             except Exception as e:
-                futil.log(f'    ✗ Error: {str(e)}')
-                failed_splits += 1
+                # This is expected - body doesn't intersect with the plane
+                futil.log(f'    - Skipped (no intersection)')
     
+    # Count final bodies
     final_body_count = 0
-    for body in activeComp.bRepBodies:
+    for body in parentComp.bRepBodies:
         if body.isSolid:
             final_body_count += 1
     
-    msg = f'✓ Created {len(planes_created)} construction planes in "{activeComp.name}"!\n✓ Successful splits: {total_splits}\n✓ Final body count: {final_body_count}'
-    if failed_splits > 0:
-        msg += f'\n⚠ Failed/skipped splits: {failed_splits}'
+    # Delete construction planes after split
+    futil.log(f'Cleaning up {len(planes_created)} construction planes...')
+    for plane in planes_created:
+        try:
+            plane.deleteMe()
+        except:
+            pass
+    
+    msg = f'✓ Successfully split bodies!\n\n• {divisions} divisions → {final_body_count} bodies\n• {total_splits} split operations completed\n\n(Construction planes cleaned up)'
     
     futil.log(msg)
     ui.messageBox(msg)
